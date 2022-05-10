@@ -1,4 +1,5 @@
 from calendar import week
+import re
 from tkinter import Button
 from config import TG_MASTER_KEY, GISEO_LOGIN, GISEO_PASSWORD
 from libgiseo import Manager
@@ -7,54 +8,34 @@ from telebot import types
 from datetime import datetime, timedelta, date
 
 weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
-
 bot = telebot.TeleBot(TG_MASTER_KEY)
 #bot.send_message(message.chat.id, text='Добро пожаловать', parse_mode='Markdown')
 #global bot_data
 
 class BotData:
-    def __init__(self, weeklessons, cday : str = '', cdate: str = ''):
+    def __init__(self, weeklessons, this_week : date = date.today(), cday : str = '', cdate: str = ''):
         self.weeklessons = weeklessons
         self.selectday = cday
         self.selectdate = cdate
+        self.this_week = this_week
 
 #bot_data = []
 
 @bot.message_handler(commands=['start'])
 def start(message):
-
     reg = check_registration(message.from_user.id)
     if reg['registred'] == 'true':
         global bot_data
-        manager = Manager (login=reg['username'], password=reg['password'])
-        #start_date = startWeek(date.today())
-        start_date = startWeek(date(2022, 5, 3))
-        end_date = endWeek(start_date)
-        diary = manager.getDiary (start=dateToSecond(start_date), end=dateToSecond(end_date))
-        
+
+        diary = get_diary(reg, date.today())
         bot_data = BotData(diary['weekDays'])
-    
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-        for wday in bot_data.weeklessons:
-            day = wday['date']
-            c = datetime.fromisoformat(day)
-            button = types.KeyboardButton(weekdays[c.weekday()] + ' (' + day + ')' )
-            markup.add(button)
-        button = types.KeyboardButton('Вернуться к выбору недели')
-        markup.add(button)
-        bot.send_message(message.chat.id, text='Неделя с ' + str(start_date) + ' по ' + str(end_date), reply_markup=markup)
-
-# from aiogram.dispatcher.filters import Text
-@bot.message_handler(commands=['Вернуться к выбору недели'])
-def with_puree(message: types.Message):
-    message.reply("Отличный выбор!")
+        drow_buttons_days(message)
 
 @bot.message_handler(content_types=['text'])
 def func(message):
     tmpday, tmpdate = day_from_message(message.text)
     legal_command = False
-
+    bot.send_sticker(message.chat.id, 'CAACAgIAAxkBAAEEstRietZXy3xPJGFwxIM7Z6dBzNMsWAACCAADwDZPE29sJgveGptpJAQ')
     if 'bot_data' not in globals():
         start(message)
         return
@@ -93,16 +74,40 @@ def func(message):
         #bot.send_message(message.chat.id, text=printedText, parse_mode='Markdown')
         bot.send_message(message.chat.id, text=printedText, reply_markup=markup, parse_mode='Markdown')
     else:
-        if message.text == 'Вернуться к выбору недели':
-            select_week(message)
+        if message.text == 'Предыдущая неделя':
+            bot_data.this_week = minus_week(bot_data.this_week)
+            reg = check_registration(message.from_user.id)
+            diary = get_diary(reg, bot_data.this_week)
+            bot_data.weeklessons = diary['weekDays']
+            drow_buttons_days(message)
+            return
+
+        if message.text == 'Следующая неделя':
+            bot_data.this_week = plus_week(bot_data.this_week)
+            reg = check_registration(message.from_user.id)
+            diary = get_diary(reg, bot_data.this_week)
+            bot_data.weeklessons = diary['weekDays']
+            drow_buttons_days(message)
+            return
+            
+        if message.text == 'Текущая неделя':
+            bot_data.this_week = date.today()
+            reg = check_registration(message.from_user.id)
+            diary = get_diary(reg, bot_data.this_week)
+            bot_data.weeklessons = diary['weekDays']
+            drow_buttons_days(message)
             return
 
         if message.text == 'Выбор дня':
-            start(message)
+            reg = check_registration(message.from_user.id)
+            diary = get_diary(reg, bot_data.this_week)
+            bot_data.weeklessons = diary['weekDays']
+            drow_buttons_days(message)
             return
 
         if bot_data.selectdate == '':
             bot.send_message(message.chat.id, text='Не коректная комманда! Выберите день недели')
+            bot.send_sticker(message.chat.id, 'CAACAgIAAxkBAAEEs0Fiet2fnuOjnE9XlPjs5G9_jGrmOgACLwMAAm2wQgNGjkrdcnqC4SQE')
             return
 
         for wday in bot_data.weeklessons:
@@ -116,10 +121,12 @@ def func(message):
                         else:
                             legal_command = True
                             bot.send_message(message.chat.id, text='💪🕺Не задано🕺💪', parse_mode='MarkdownV2')
-                else:
+                        bot.send_animation(message.chat.id,r'https://i.pinimg.com/originals/a5/e3/81/a5e381d08ef1b8f964b24672b0b0a9f9.gif')
+                else:   
                     if legal_command == False:
                         bot.send_message(message.chat.id, text = 'Не коректная комманда! Выберите урок')    
-
+                        bot.send_sticker(message.chat.id, 'CAACAgIAAxkBAAEEs0Fiet2fnuOjnE9XlPjs5G9_jGrmOgACLwMAAm2wQgNGjkrdcnqC4SQE')
+                        
 def check_registration(user_id):
     return { 'registred': 'true', 'cid': '2', 'sid': '11', 'pid': '-168', 'cn': '168', 'sft': '2', 'scid': '8', 'username': GISEO_LOGIN, 'password': GISEO_PASSWORD }
 
@@ -150,11 +157,36 @@ def endWeek(ddate):
 def dateToSecond(ddate):
     return (ddate.date() - date(1970, 1, 1)).total_seconds()
 
-def select_week(message):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons=['Предыдущая неделя','Текущая неделя','Следующая неделя']
-    keyboard.add(*buttons)
-    bot.send_message(message.chat.id, text='Выбор недели', reply_markup=keyboard)
+def minus_week(this_week):
+    this_week -= timedelta(days=7)
+    return this_week
+
+def plus_week(this_week):
+    this_week += timedelta(days=7)
+    return this_week
+
+def get_diary(reg, ddate):
+    manager = Manager (login=reg['username'], password=reg['password'])
+    start_date = startWeek(ddate)
+    end_date = endWeek(start_date)
+    diary = manager.getDiary (start=dateToSecond(start_date), end=dateToSecond(end_date))
+    return diary
+
+def drow_buttons_days(message):
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        for wday in bot_data.weeklessons:
+            day = wday['date']
+            c = datetime.fromisoformat(day)
+            button = types.KeyboardButton(weekdays[c.weekday()] + ' (' + day + ')' )
+            markup.add(button)
+        
+        #markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        buttons=['Предыдущая неделя','Текущая неделя','Следующая неделя']
+        markup.add(*buttons)
+
+        start_date = startWeek(bot_data.this_week)
+        end_date = endWeek(start_date)
+        bot.send_message(message.chat.id, text='Неделя с \n' + str(start_date).split(' ')[0] + ' по ' + str(end_date).split(' ')[0], reply_markup=markup)
 
 if __name__ == '__main__':
     bot.polling(none_stop=True, interval=0)
