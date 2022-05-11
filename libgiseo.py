@@ -170,3 +170,6 @@ class Manager:
   def getStudentId(self):
     s = self.getStudent()
     return s['students'][0]['studentId']
+
+  def downloadAttachment(self, attacmentId):
+    return self.send(f'attachments/{attacmentId}', 'GET', { 'Referer':  'https://giseo.rkomi.ru/angular/school/studentdiary/', 'responseType' : 'arraybuffer' } )
